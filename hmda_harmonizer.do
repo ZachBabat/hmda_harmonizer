@@ -29,6 +29,8 @@ global ROOT "C:/Users/zbabat/Desktop/hmda_harmonizer"
 cd "${ROOT}"
 log using "hmda_harmonizer.log", append
 
+*USER: SEE "Sources.docx" FOR INSTRUCTIONS TO DOWNLOAD RAW INPUT FILES (est. time 5-15 mins)
+
 *UNZIPPING DOWNLOADS AND CONVERTING TO DTA WHEN NEEDED
 *HMDA Lender Panels:
 /*2010-2017 panel data*/
