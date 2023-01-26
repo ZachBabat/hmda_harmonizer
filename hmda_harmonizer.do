@@ -21,24 +21,82 @@ STRUCTURE:
 /*0. SET-UP*/
 clear all 
 set more off
-set varabbrev off 	
-	if c(username)=="zbabat" {
-		if c(os) == "Windows" {
-			global DRIVE "G:/.shortcut-targets-by-id/1fYJNEPY5Dfesnt3szWIA59f14c3tBrk_/2021_housing_and_household_finance"
-			global LAR "Z:/projects/hmda_loan_application_register"
-		}
-		else if c(os) == "Unix" {
-			global DRIVE "/home/real/zbabat/Drive/2021_housing_and_household_finance/"
-			global LAR "/home/mnt/projects02/sophiecw/hmda_loan_application_register/"
-		}
-	}
+set varabbrev off 
+cap log close	
+
+*USER: CHANGE "ROOT" MACRO TO THE LOCATION OF THE HMDA_HARMONIZER FOLDER
+global ROOT "C:/Users/zbabat/Desktop/hmda_harmonizer"
+cd "${ROOT}"
+log using "hmda_harmonizer.log", append
+
+*UNZIPPING DOWNLOADS AND CONVERTING TO DTA WHEN NEEDED
+*HMDA Lender Panels:
+/*2010-2017 panel data*/
+forvalues i = 2010/2017 {
+	unzipfile hmda_lender_panels/hmda_`i'_panel
+	clear
+	import delimited hmda_`i'_panel, varnames(1)
+	save hmda_lender_panels/hmda_`i'_panel, replace
+	erase hmda_`i'_panel.csv
+}
+
+/*Fixing an error in 2012 HMDA reporter panel:
+all the RSSD identifiers have the number "0" appended to the end - we fix that
+here by taking every digit from the RSSD identifiers except the last one, and
+save the corrected file. Note that 79 observations have respondentrssdid = 0, these
+just get converted to missing, which is fine since 0 isn't a valid RSSD*/
+
+use hmda_lender_panels/hmda_2012_panel
+tostring respondentrssdid, gen(stringid)
+replace stringid = substr(stringid, 1, strlen(stringid) - 1)
+drop respondentrssdid 
+destring stringid, replace 
+ren stringid respondentrssdid 
+save hmda_lender_panels/hmda_2012_panel, replace 
+
+/*2018-2021 panel data*/
+forvalues i = 2018/2021 {
+	unzipfile hmda_lender_panels/`i'_public_panel_csv
+	clear
+	import delimited `i'_public_panel_csv, varnames(1)
+	save hmda_lender_panels/`i'_public_panel_csv, replace
+	erase `i'_public_panel_csv.csv
 	
-	include "${DRIVE}/1code/000_directories.do" 
-	cap log close
-	log using "${LOG}/003_create_hmda_id_panel.log", append
+	*cleaning up junk files included with the 2018 data
+	if `i' == 2018 {
+		erase __MACOSX/._`i'_public_panel_csv.csv
+		rmdir __MACOSX
+	}
+}
+
+/*Avery File data*/
+cd avery_file
+unzipfile hmdpanel17, replace 
+unzipfile HMDA_lender_files_2018-2021, replace 
+cd ..
+
+/*NIC data*/
+cd nic 
+unzipfile CSV_ATTRIBUTES_ACTIVE, replace 
+unzipfile CSV_ATTRIBUTES_CLOSED, replace 
+unzipfile CSV_ATTRIBUTES_BRANCHES, replace 
+unzipfile CSV_RELATIONSHIPS, replace 
+unzipfile CSV_TRANSFORMATIONS, replace 
+cd ..
+
+/*HMDA-to-LEI crosswalk panel*/
+cd hmda_to_lei_xwalk
+unzipfile arid2017_to_lei_xref_csv, replace 
+clear 
+import delimited arid2017_to_lei_xref_csv.csv, varnames(1)
+save arid2017_to_lei_xref_csv, replace 
+erase arid2017_to_lei_xref_csv.csv
+cd ..
+
+
 	
 /*SECTION 1. MERGING TOGETHER HMDA PANELS, PRE-2017****************************/
-use "${LAR}/input/original_hmda/dta_versions/hmda_2010_panel"
+use "hmda_lender_panels/hmda_2010_panel"
 keep respondentrssdid respondentid agencycode respondentnamepanel parentrssdid 
 ren respondentid respondentid2010
 ren agencycode agencycode2010
@@ -93,7 +151,7 @@ clear
 /*Now, we loop through the procedure above for each panel file, and merge
 together using respondentrssdid*/
 forvalues x = 2011/2017 {
-	use "${LAR}/input/original_hmda/dta_versions/hmda_`x'_panel"
+	use "hmda_lender_panels/hmda_`x'_panel"
 	keep respondentrssdid respondentid agencycode respondentnamepanel parentrssdid 
 	ren respondentid respondentid`x'
 	ren agencycode agencycode`x'
@@ -141,7 +199,7 @@ use `working'
 order respondentname* concatid*, sequential 
 order respondentrssdid respondentname*
 
-save "${PROCESSED_DATA}/003_hmda_id_panel", replace
+save "hmda_harmonizer_panel", replace
 
 /*SECTION 2. Resolving "problembanks" cases where RSSD == 0, RSSD ==., or
 cases where RSSD is nonunique in a given year**********************************/
@@ -239,7 +297,7 @@ sort namecount concatid year
 
 *now, we need a long-form version of our main panel
 clear 
-use "${PROCESSED_DATA}/003_hmda_id_panel"
+use "hmda_harmonizer_panel"
 keep respondentnamepanel* concatid* respondentrssdid 
 reshape long respondentnamepanel@ concatid@, i(respondentrssdid) j(year)
 drop if concatid == ""
@@ -338,7 +396,7 @@ drop if respondentrssdid == 3881992 | respondentrssdid == 3874118
 *master so we can correctly observe where the problembanks update the main panel
 tempfile problempanel1 
 save `problempanel1'
-use "${PROCESSED_DATA}/003_hmda_id_panel", clear
+use "hmda_harmonizer_panel", clear
 merge 1:1 respondentrssdid using `problempanel1', update gen(update1)
 
 *2.b.ii.8
@@ -354,7 +412,7 @@ replace respondentnamepanel2010 = "WALL STREET MORTGAGE BANKERS" if respondentrs
 replace agencycode2010 = "7" if respondentrssdid == 4327965
 replace respondentid2010 = "766-0674421" if respondentrssdid == 4327965
 
-save "${PROCESSED_DATA}/003_hmda_id_panel.dta", replace 
+save "hmda_harmonizer_panel.dta", replace 
 
 /*SECOND - MERGING PROBLEMBANKS THAT DON'T MATCH NON-PROBLEMBANKS INTO THE MAIN ID PANEL
 USING THE AVERY FILE*/
@@ -372,7 +430,7 @@ preserve
 			gen code = substr(concatid, 1, 1)
 			destring code, replace 
 			local y = 10
-			merge 1:1 hmprid code using "${RAW_DATA}/hmda_id_supplements/avery_file/hmdpanel17.dta", keep(match)
+			merge 1:1 hmprid code using "avery_file/hmdpanel17.dta", keep(match)
 			keep hmprid code name year RSSD`y'
 			
 			tempfile test
@@ -389,7 +447,7 @@ forvalues x = 2011/2017 {
 		gen code = substr(concatid, 1, 1)
 		destring code, replace 
 		local y = `x' - 2000
-		merge 1:1 hmprid code using "${RAW_DATA}/hmda_id_supplements/avery_file/hmdpanel17.dta", keep(match)
+		merge 1:1 hmprid code using "avery_file/hmdpanel17.dta", keep(match)
 		keep hmprid code name year RSSD`y'
 		append using `test'
 		save `test', replace
@@ -449,7 +507,7 @@ preserve
 	destring agencycode, replace 
 	gen respondentid = substr(concatid2010, 2, .)
 	count
-	merge 1:1 respondentid agencycode using "${LAR}/input/original_hmda/dta_versions/hmda_2010_panel.dta", keep(match)
+	merge 1:1 respondentid agencycode using "hmda_lender_panels/hmda_2010_panel.dta", keep(match)
 	
 	
 	keep rssd concatid2010 respondentnamepanel
@@ -470,7 +528,7 @@ foreach x in 2011 2012 2013 2014 2016 2017 {
 	destring agencycode, replace 
 	gen respondentid = substr(concatid`x', 2, .)
 	count
-	merge 1:1 respondentid agencycode using "${LAR}/input/original_hmda/dta_versions/hmda_`x'_panel.dta", keep(match)
+	merge 1:1 respondentid agencycode using "hmda_lender_panels/hmda_`x'_panel.dta", keep(match)
 	
 	
 	keep rssd concatid`x' respondentnamepanel
@@ -491,7 +549,7 @@ save `namematched', replace
 
 *now, once again merging these onto the main panel using the update option.
 *note that we do m:1 merges now that we have some multi-concatid RSSDs
-use "${PROCESSED_DATA}/003_hmda_id_panel", clear
+use "hmda_harmonizer_panel", clear
 merge m:1 respondentrssdid using `namematched', update gen(update2)
 
 *FLAG FOR FUTURE!!! the bank with RSSD 4160667 is super complicated,
@@ -499,7 +557,7 @@ merge m:1 respondentrssdid using `namematched', update gen(update2)
 *this is one of the banks we update in the merge immediately above
 
 drop update1 update2
-save "${PROCESSED_DATA}/003_hmda_id_panel", replace 
+save "hmda_harmonizer_panel", replace 
 
 /*THIRD - MERGE THE PROBLEMBANKS THAT DIDN'T FIND NON-PROBLEMBANK MATCHES INTO THE ID PANEL*/
 *at this point, we give up - if a bank hasn't been associated with an RSSD yet,
@@ -538,10 +596,10 @@ ren name* respondentnamepanel*
 *appending, not merging, onto the main panel - we don't merge because, assuming
 *that these banks truly have no RSSD IDs, these are entirely new rows that are
 *unrepresented among the banks already included in the main panel 
-append using "${PROCESSED_DATA}/003_hmda_id_panel"
+append using "hmda_harmonizer_panel"
 order respondentnamepanel* concatid*, sequential
 order respondentrssdid metaid
-save "${PROCESSED_DATA}/003_hmda_id_panel", replace 
+save "hmda_harmonizer_panel", replace 
 
 *now, we have banks identified using RSSDs and banks identified using metaids in 
 *the same panel. This is a problem if we want to merge on other banks, because
@@ -551,7 +609,7 @@ save "${PROCESSED_DATA}/003_hmda_id_panel", replace
 tostring respondentrssdid, gen(masterid)
 replace masterid = metaid if metaid != ""
 order masterid
-save "${PROCESSED_DATA}/003_hmda_id_panel", replace 
+save "hmda_harmonizer_panel", replace 
 
 
 /*SECTION 2.3 - Merging on banks with duplicate non-missing RSSDs**************/
@@ -564,7 +622,7 @@ order respondentrssdid
 tostring respondentrssdid, gen(masterid)
 save `dupbanks', replace 
 
-use "${PROCESSED_DATA}/003_hmda_id_panel", clear
+use "hmda_harmonizer_panel", clear
 merge 1:m masterid using `dupbanks', update nogen
 
 *we need to make some adjustments - the merge we just did successfully merges on
@@ -628,7 +686,7 @@ forvalues x = 2011/2017{
 append using `allentate'
 replace masterid = "3881992" if concatid2016 == "747-5133238"
 
-save "${PROCESSED_DATA}/003_hmda_id_panel", replace 
+save "hmda_harmonizer_panel", replace 
 
 /*SECTION 3. MERGING ON POST-2017 DATA*****************************************/
 *SUBSECTION 1
@@ -661,7 +719,7 @@ save "${PROCESSED_DATA}/003_hmda_id_panel", replace
 *Rather than actually merging, we'll append these panels together, set aside
 *the lenders that have more than 1 RSSD per LEI, then reshape wide using LEI as the unique identifier.
 *This is equivalent to a merge on LEI but it lets us identify the multi-RSSD LEIs 
-use "${LAR}/input/original_hmda/dta_versions/2018_public_panel_csv", clear
+use "hmda_lender_panels/2018_public_panel_csv", clear
 keep lei respondent_rssd respondent_name activity_year 
 ren activity_year year 
 ren respondent_rssd rssd 
@@ -670,7 +728,7 @@ tempfile long2018
 save `long2018'
 
 forvalues i = 2019/2021 {
-	use "${LAR}/input/original_hmda/dta_versions/`i'_public_panel_csv", clear
+	use "hmda_lender_panels/`i'_public_panel_csv", clear
 	keep lei respondent_rssd respondent_name activity_year 
 	ren activity_year year 
 	ren respondent_rssd rssd 
@@ -733,14 +791,14 @@ save `missingrssdpost2017', replace
 *NOTE THAT NONE OF THE "BRANCHES" BANKS HAVE AN LEI
 
 clear
-import delimited "${RAW_DATA}/hmda_id_supplements/NIC/CSV_ATTRIBUTES_ACTIVE.CSV"
+import delimited "nic/CSV_ATTRIBUTES_ACTIVE.CSV"
 tempfile active
 keep id_rssd id_lei nm_lgl
 gen active = 1
 save `active', replace
 clear 
 
-import delimited "${RAW_DATA}/hmda_id_supplements/NIC/CSV_ATTRIBUTES_CLOSED.CSV"
+import delimited "nic/CSV_ATTRIBUTES_CLOSED.CSV"
 tempfile closed
 keep id_rssd id_lei nm_lgl
 gen active = 0
@@ -781,8 +839,9 @@ save `missingrssdpost2017', replace
 *be matched in the Avery files
 
 *First, we merge together the Avery files using LEI, so we have the names and RSSDs for every bank
-use lei RSSD18 NAME18 using "${RAW_DATA}/hmda_id_supplements/avery_file/hmdpan2018b.dta", clear
-merge 1:1 lei using "${RAW_DATA}/hmda_id_supplements/avery_file/hmdpan2019b.dta", nogen keepusing (lei RSSD19 NAME19)
+use LEI RSSD18 NAME18 using "avery_file/hmda_panel_2018", clear
+merge 1:1 LEI using "avery_file/hmda_panel_2019", nogen keepusing (LEI RSSD19 NAME19)
+ren LEI lei 
 
 *now we merge on the banks to which we're trying to add RSSDs 
 merge 1:1 lei using `missingrssdpost2017'
@@ -827,13 +886,13 @@ save `missingrssdpost2017', replace
 *year to recover what each panel says is the HMDA ID
 
 forvalues i = 2018/2019 {
-	merge 1:1 lei using "${LAR}/input/original_hmda/dta_versions/`i'_public_panel_csv", ///
+	merge 1:1 lei using "hmda_lender_panels/`i'_public_panel_csv", ///
 	keepusing(arid_2017) gen(merge`i') keep(master match)
 	ren arid_2017 arid_`i'
 }
 
 forvalues i = 2020/2021 {
-	merge 1:1 lei using "${LAR}/input/original_hmda/dta_versions/`i'_public_panel_csv", ///
+	merge 1:1 lei using "hmda_lender_panels/`i'_public_panel_csv", ///
 	keepusing(id_2017 agency_code) gen(merge`i') keep(master match)
 	ren id_2017 arid_`i'
 	ren agency_code agency_code_`i'
@@ -879,7 +938,7 @@ preserve
 	save `xwalktest'
 	clear 
 
-	import delimited "${RAW_DATA}/hmda_id_supplements/hmda_to_lei_xwalk/arid2017_to_lei_xref_csv.csv", varnames(1)
+	import delimited "hmda_to_lei_xwalk/arid2017_to_lei_xref_csv.csv", varnames(1)
 	ren lei_2018 lei
 	merge 1:1 lei using `xwalktest'
 	assert _merge != 3
@@ -902,7 +961,7 @@ tempfile aridmerge1
 save `aridmerge1'
 clear
 
-use "${PROCESSED_DATA}/003_hmda_id_panel" 
+use "hmda_harmonizer_panel" 
 *we need to make a variable that has the 2017 HMDA IDs reformatted to match
 *the post-2017 IDs. Namely, we need to remove "-" characters
 
@@ -970,13 +1029,13 @@ use `missingrssdpost2017'
 merge 1:1 lei using `aridmerge1', keep(master) nogen
 save `missingrssdpost2017', replace
 
-merge 1:1 lei using "${RAW_DATA}/hmda_id_supplements/avery_file/hmdpan2018b.dta", ///
+merge 1:1 lei using "avery_file/hmda_panel_2018", ///
 	keepusing(oldid CODE17 hmprid) keep(master match) gen(avery1)
 
 ren hmprid hmprid18	
 ren CODE17 code18 
 	
-merge 1:1 lei using "${RAW_DATA}/hmda_id_supplements/avery_file/hmdpan2019b.dta", ///
+merge 1:1 lei using "avery_file/hmda_panel_2019", ///
 	keepusing(CODE17 hmprid) keep(master match) gen(avery2)
 
 ren hmprid hmprid19
@@ -1070,7 +1129,7 @@ save `workingpost2017', replace
 
 *We do the merge as an update/replace merge to ensure that there are no conflicting
 *values in the data when matching on masterid 
-use "${PROCESSED_DATA}/003_hmda_id_panel", clear 
+use "hmda_harmonizer_panel", clear 
 merge m:1 masterid using `workingpost2017', gen(prepostmerge) update replace
 assert prepostmerge != 4 & prepostmerge != 5
 
@@ -1098,7 +1157,7 @@ replace concatid2019 = "" if concatid2016 == "30000057497"
 replace concatid2020 = "" if concatid2016 == "30000057497"
 replace concatid2021 = "" if concatid2016 == "30000057497"
 
-save "${PROCESSED_DATA}/003_hmda_id_panel", replace
+save "hmda_harmonizer_panel", replace
 
 *3.f
 
@@ -1239,7 +1298,7 @@ ren lei* concatid*
 save `multi_RSSD_leis', replace 
 
 *after the work we just did, a few rows in the main panel should be linked with the same masterid.
-use "${PROCESSED_DATA}/003_hmda_id_panel", clear 
+use "hmda_harmonizer_panel", clear 
 
 replace masterid = "200378" if rssd == 3153130
 replace masterid = "2760232" if rssd == 3251027
@@ -1256,7 +1315,7 @@ assert multi_rssd_lei_merge == 1 | multi_rssd_lei_merge == 2 | multi_rssd_lei_me
 drop multi_rssd_lei_merge
 sort masterid
 
-save "${PROCESSED_DATA}/003_hmda_id_panel", replace
+save "hmda_harmonizer_panel", replace
 *we have now completed merging together all the pre-2017 and post-2017 rows
 
 /*SECTION 4. RSSD SWITCHERS AND HMDA ID DONUTS*****************************/
@@ -1279,7 +1338,7 @@ save "${PROCESSED_DATA}/003_hmda_id_panel", replace
 */
 
 /*SUBSECTION 1: USE NIC DATASET TO LOOK FOR BANKS THAT SWITCH RSSDs*/
-use "${PROCESSED_DATA}/003_hmda_id_panel", clear 
+use "hmda_harmonizer_panel", clear 
 keep masterid concatid* name* 
 duplicates tag masterid, gen(flag)
 drop if flag > 0
@@ -1308,7 +1367,7 @@ tempfile longformconcatcheck
 save `longformconcatcheck'
 clear 
 
-import delimited "${RAW_DATA}/hmda_id_supplements/NIC/CSV_TRANSFORMATIONS.CSV"
+import delimited "nic/CSV_TRANSFORMATIONS.CSV"
 tostring dt_trans, gen(year)
 replace year = substr(year, 1, 4)
 destring year, replace 
@@ -1351,7 +1410,7 @@ order masterid concatid year name
 */
 
 *Now, implementing the changes described above: 
-use "${PROCESSED_DATA}/003_hmda_id_panel.dta", clear
+use "hmda_harmonizer_panel", clear
 
 *Credit Suisse Lending LLC
 replace masterid = "4455073" if masterid == "445073"
@@ -1372,11 +1431,11 @@ replace masterid = "3715220" if masterid == "4185736"
 *Entrust Mortgage LLC 
 replace masterid = "4185688" if masterid == "3720532"
 
-save "${PROCESSED_DATA}/003_hmda_id_panel", replace 
+save "hmda_harmonizer_panel", replace 
 
 /*SUBSECTION 2: IDENTIFYING DONUTS*/
 *First, we identify the donuts
-use "${PROCESSED_DATA}/003_hmda_id_panel", clear
+use "hmda_harmonizer_panel", clear
 
 preserve 
 
@@ -1420,7 +1479,7 @@ gen donut = donutmerge == 3
 drop donutmerge
 
 *saving our donut-identified version of the panel 
-save "${PROCESSED_DATA}/003_hmda_id_panel", replace 
+save "hmda_harmonizer_panel", replace 
 
 /*SUBSECTION 3: MATCHING DONUTS ONTO INFORMATION FROM THE AVERY FILE***********/
 keep if donut == 1
@@ -1452,7 +1511,7 @@ drop if rssd == .
 tempfile tempdonuts 
 save `tempdonuts'
 
-use "${RAW_DATA}\hmda_id_supplements\avery_file\hmdpanel17.dta", clear
+use "avery_file/hmdpanel17.dta", clear
 keep hmprid code RSSD10 RSSD11 RSSD12 RSSD13 RSSD14 RSSD15 RSSD16 RSSD17 ///
 APPL10 APPL11 APPL12 APPL13 APPL14 APPL15 APPL16 APPL17 ///
 ORIG10 ORIG11 ORIG12 ORIG13 ORIG14 ORIG15 ORIG16 ORIG17 ///
@@ -1505,10 +1564,10 @@ forvalues x = 2010/2017 {
 *do the same with the 2018 and 2019 Avery files
 forvalues x = 18/19 {
 	local y = `x' + 2000
-	use "${RAW_DATA}/hmda_id_supplements/avery_file/hmdpan`y'b.dta", clear 
+	use "avery_file/hmda_panel_`y'.dta", clear 
 	ren *`x' *20`x'
-	keep APPL`y' ORIG`y' ORIGD`y' ASSETL`y' ASSETS`y' lei
-	ren lei concatid`y'
+	keep APPL`y' ORIG`y' ORIGD`y' ASSETL`y' ASSETS`y' LEI
+	ren LEI concatid`y'
 	merge 1:m concatid`y' using `tempdonuts', gen(averymerge`y')
 	drop if averymerge`y' == 1
 	save `tempdonuts', replace 
@@ -1539,9 +1598,10 @@ forvalues x = 2010/2017 {
 *do the same with the 2018 and 2019 Avery files
 forvalues x = 18/19 {
 	local y = `x' + 2000
-	use "${RAW_DATA}/hmda_id_supplements/avery_file/hmdpan`y'b.dta", clear 
+	use "avery_file/hmda_panel_`y'.dta", clear 
 	ren *`x' *20`x'
-	keep APPL`y' ORIG`y' ORIGD`y' ASSETL`y' ASSETS`y' lei
+	keep APPL`y' ORIG`y' ORIGD`y' ASSETL`y' ASSETS`y' LEI 
+	ren LEI lei
 	merge 1:m lei using `donuts2', gen(averymerge`y')
 	drop if averymerge`y' == 1
 	save `donuts2', replace 
@@ -1587,7 +1647,7 @@ gsort -meanorigd //descending sort, so biggest banks get prioritized
 *my notes on this process/why I am correcting these masterid codes
 *are in Appendix B of the documentation
 
-use "${PROCESSED_DATA}/003_hmda_id_panel", clear
+use "hmda_harmonizer_panel", clear
 
 *Implementing changes:
 
@@ -1609,7 +1669,7 @@ replace donut = 0 if masterid == "2860459"
 replace masterid = "672984" if masterid == "1018945"
 replace donut = 0 if masterid == "672984"
 
-save "${PROCESSED_DATA}/003_hmda_id_panel", replace 
+save "hmda_harmonizer_panel", replace 
 
 /*SECTION 5. FINAL ADJUSTMENTS: ADDING LENDERS IN LOAN DATA BUT NOT PANELS, QUALITY CHECKS********/
 
@@ -1651,7 +1711,7 @@ drop agencycode* respondentid* parentrssdid* merge*
 *All the banks with prepostmerge missing only exist post-2017 
 replace prepostmerge = 2 if prepostmerge == .
 order prepostmerge, last
-save "${PROCESSED_DATA}/003_hmda_id_panel", replace  
+save "hmda_harmonizer_panel", replace  
 
 *5.d
 /*ADDING IN POST-2017 BANKS THAT WERE NOT INCLUDED IN HMDA LENDER PANELS*/
@@ -1672,7 +1732,7 @@ save "${PROCESSED_DATA}/003_hmda_id_panel", replace
 	*Use LEI as the masterid to identify remaining banks
 	*Merge this subset of banks onto the main panel
 
-use "${RAW_DATA}/hmda_id_supplements/banks_not_in_lender_panel", clear 
+use "banks_not_in_lender_panel", clear 
 
 forvalues i = 2018/2021 {
 	assert lei`i' == lei if lei`i' != ""
@@ -1682,7 +1742,7 @@ tempfile missinglei
 save `missinglei'
 
 *Merge these banks onto RSSDs in NIC Active Dataset
-import delimited "${RAW_DATA}/hmda_id_supplements/NIC/CSV_ATTRIBUTES_ACTIVE.CSV", clear
+import delimited "nic/CSV_ATTRIBUTES_ACTIVE.CSV", clear
 
 ren id_lei lei 
 drop if lei == "0" 
@@ -1692,7 +1752,7 @@ merge 1:1 lei using `missinglei', keep(using match) nogen
 save `missinglei', replace 
 
 *Merge these banks onto RSSDs in NIC Closed Dataset
-import delimited "${RAW_DATA}/hmda_id_supplements/NIC/CSV_ATTRIBUTES_CLOSED.CSV", clear
+import delimited "nic/CSV_ATTRIBUTES_CLOSED.CSV", clear
 
 ren id_lei lei 
 drop if lei == "0"
@@ -1700,10 +1760,12 @@ keep lei id_rssd
 merge 1:1 lei using `missinglei', keep(using match) nogen
 
 *Merge these banks onto RSSDs in the 2018 Avery file
-merge 1:1 lei using "${RAW_DATA}/hmda_id_supplements/avery_file/hmdpan2018b.dta", keep(master match) nogen keepusing(RSSD18)
+ren lei LEI
+merge 1:1 LEI using "avery_file/hmda_panel_2018", keep(master match) nogen keepusing(RSSD18)
 
 *Merge these banks onto RSSDs in the 2019 Avery file
-merge 1:1 lei using "${RAW_DATA}/hmda_id_supplements/avery_file/hmdpan2019b.dta", keep(master match) nogen keepusing(RSSD19)
+merge 1:1 LEI using "avery_file/hmda_panel_2019", keep(master match) nogen keepusing(RSSD19)
+ren LEI lei
 
 *Merge these banks onto banks that already appear in the crosswalk 
 *To keep it simple, only use banks that haven't already matched to an lei 
@@ -1716,7 +1778,7 @@ tempfile missingleisubset
 save `missingleisubset' 
 
 forvalues i = 2018/2021 {
-	use "${PROCESSED_DATA}/003_hmda_id_panel", clear 
+	use "hmda_harmonizer_panel", clear 
 	keep if concatid`i' != ""
 	ren concatid`i' lei
 	keep masterid lei
@@ -1765,14 +1827,14 @@ ren lei* concatid*
 
 *Now, we merge these banks onto the main panel
 save `missinglei', replace 
-use "${PROCESSED_DATA}/003_hmda_id_panel", clear 
+use "hmda_harmonizer_panel", clear 
 merge m:1 masterid using `missinglei', update replace assert(1 2 4)
 
 replace donut = 0 if _merge == 2 //I checked - none of these are donuts
 replace prepostmerge = 2 if _merge == 2 //these are all post-2017, didn't match to a pre-2017 bank
 drop _merge 
 
-save "${PROCESSED_DATA}/003_hmda_id_panel", replace  
+save "hmda_harmonizer_panel", replace  
 
 *Ideas for future improvement:
 *Tag all the banks where I did any manual recoding with a binary variable 
