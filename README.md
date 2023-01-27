@@ -2,6 +2,7 @@
 Project to create a multi-year crosswalk for HMDA ID codes
 
 Contents:
+
 Documentation for HMDAHarmonizer.docx: Contains full documentation for everything in this folder
 
 hmda_harmonizer_panel.dta: Final product of this replication package, a multi-year crosswalk for HMDA ID codes
