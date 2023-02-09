@@ -1838,6 +1838,244 @@ drop _merge
 
 save "hmda_harmonizer_panel", replace  
 
-*Ideas for future improvement:
-*Tag all the banks where I did any manual recoding with a binary variable 
-*Do I want to replace metaid with LEI for banks where masterid is an LEI?
+*Finally, we want to see whether we can gain any information from the 2020 and 2021
+*versions of the Avery file:
+	
+use "avery_file/hmda_panel_2020", clear
+ren LEI concatid2020
+ren RSSD20 rssdavery 
+tempfile avery20 
+save `avery20'
+
+use "avery_file/hmda_panel_2021", clear 
+ren LEI concatid2021
+ren RSSD21 rssdavery 
+tempfile avery21
+save `avery21'
+
+*We begin with the 2020 Avery file data
+
+/*Merge on the 2020 Avery file, and generate a variable that flags when
+*a given LEI has different RSSDs in our panel and in the Avery file*/
+use "hmda_harmonizer_panel", clear
+keep if concatid2020 != ""
+merge 1:1 concatid2020 using `avery20'
+	
+gen flag = (rssd != rssdavery) & (rssdavery != 0) & (rssdavery != .)	
+order flag masterid rssd rssdavery
+sort flag
+keep if flag == 1
+
+keep rssdavery concatid2020
+ren rssdavery rssd 
+gen masterid = concatid2020 
+tempfile concatidcheck 
+save `concatidcheck'
+
+*Now that we have this subset of banks where LEI/RSSD is different in each panel, 
+*there are two possibilities for each bank:
+	*The Avery file provides an RSSD where we previously had none (most cases)
+		*When this happens, we also need to check that the bank for which we're hoping to 
+		*fill in an RSSD doesn't already exist in our dataset as an LEI-identified bank
+	*There's a disagreement between the RSSDs on file in the Avery file and our file.
+	
+*Our plan is as follows:
+*Take the 35 banks that flagged above. Using masterid = LEI, merge them back onto 
+*the main panel.
+	*First, look at the 30 _merge == 4 observations - these cases are "missing updated",
+	*meaning that we've taken banks that were previously only identified with LEI, and have now
+	*added an RSSD.
+	*We take those _merge == 4 observations, declare masterid == RSSD, then 
+	*merge back onto the main panel as a way to check whether this RSSD was already 
+	*in use. In the case of these 30 observations, we only get _merge == 2 (the RSSD was
+	*not in use) or _merge == 4 (the RSSD was in use and we've just populated the
+	*concatid2020 variable where it was once empty).
+	
+	*Then, look at the 5 _merge == 2 observations. These cases are instances are 
+	*"using only", meaning there is no row with masterid == LEI for these banks,
+	*and suggesting that this LEI is already on record under a different RSSD.
+	*We will show that when this happens, our RSSD-LEI pairings are supported by the 
+	*original HMDA lender panel.
+
+	
+use "hmda_harmonizer_panel", clear
+merge m:1 masterid using `concatidcheck', update
+sort _merge
+order _merge
+tab _merge 
+tempfile working2020
+save `working2020'
+
+keep if _merge == 4
+keep rssd concatid2020 
+tostring rssd, gen(masterid)
+tempfile check2020
+save `check2020'
+use "hmda_harmonizer_panel", clear
+merge m:1 masterid using `check2020', update replace 
+sort _merge
+order _merge
+
+*Ignoring our planned _merge == 1's, we got all _merge == 2's and 4's, suggesting 
+*we're either filling in an already-existing time series associated with an RSSD, 
+*or we're adding RSSDs to the panel. That is, there are no RSSD-LEI conflicts.
+
+*Saving a tempfile so we can append on these new rows later
+
+keep if _merge != 1
+tempfile tomerge2020
+save `tomerge2020'
+
+*We just handled 30/35 of the flagged banks from 2020. Next, look at the remaining 5 _merge == 2 observations.
+use `working2020'
+keep if _merge == 2
+
+*Here, I manually audited the remaining five banks. Two of them, with LEI codes:
+*5493001R92DY5DI1DI85 and 5493003QF1L7XNSWRM19, we've already manually recoded above,
+*and the RSSD in the Avery file actually matches the masterid we manually assigned.
+
+*The other 3, with LEI codes: 549300SCFWZXMDMZPE93, 549300S5NLOTO329NX77, and 5493000YNV8IX4VD3X12,
+*I manually confirm have the same RSSD in our masterid and in the lender panel (we disagree with the Avery file).
+*No changes made for these banks.
+
+*Now, we repeat the procedure for the 2021 Avery file:
+/*Merge on the 2021 Avery file, and generate a variable that flags when
+*a given LEI has different RSSDs in our panel and in the Avery file*/
+use "hmda_harmonizer_panel", clear
+keep if concatid2021 != ""
+merge 1:1 concatid2021 using `avery21'
+	
+gen flag = (rssd != rssdavery) & (rssdavery != 0) & (rssdavery != .)	
+order flag masterid rssd rssdavery
+sort flag
+keep if flag == 1
+
+keep rssdavery concatid2021
+ren rssdavery rssd 
+gen masterid = concatid2021
+tempfile concatidcheck 
+save `concatidcheck'
+
+use "hmda_harmonizer_panel", clear
+merge m:1 masterid using `concatidcheck', update
+sort _merge
+order _merge
+tab _merge 
+tempfile working2021
+save `working2021'
+
+keep if _merge == 4
+keep rssd concatid2021
+tostring rssd, gen(masterid)
+tempfile check2021
+save `check2021'
+use "hmda_harmonizer_panel", clear
+merge m:1 masterid using `check2021', update replace 
+sort _merge
+order _merge
+
+*Ignoring our planned _merge == 1's, we got all _merge == 2's and 4's, suggesting 
+*we're either filling in an already-existing time series associated with an RSSD, 
+*or we're adding RSSDs to the panel. That is, there are no RSSD-LEI conflicts.
+
+*Now, we just need to remove any rows associated with these LEIs in 2020 
+*in the main panel, so we don't duplicate them when we add these improved rows later
+
+keep if _merge != 1
+*Saving a tempfile so we can append on these new rows
+tempfile tomerge2021
+save `tomerge2021'
+
+*Next, look at the remaining _merge == 2 observations.
+use `working2021'
+keep if _merge == 2
+
+*Once again, let's check this against the lender panel for 2021 - too many banks
+*to do manually this time:
+
+keep masterid concatid2021 rssd 
+ren concatid2021 lei
+merge 1:1 lei using "hmda_lender_panels/2021_public_panel_csv.dta", keep(match)
+assert rssd != respondent_rssd
+
+*Once again, all remaining banks are points of disagreement between us and the Avery file,
+*we don't alter RSSD-LEI pairs for these banks since our pairings match those in the lender panel
+
+*So now, all that's left to do is add our newly RSSD-identified banks into the main panel.
+clear
+use `tomerge2020'
+append using `tomerge2021'
+tempfile lateadditions
+save `lateadditions'
+*Once again, we have two groups of banks here:
+*	1) banks where we're populating concatid2020/2021 for an RSSD we already had in the panel (_merge == 4)
+*	2) banks where we're adding new RSSDs to the dataset (_merge == 2)
+
+*Handling the first type:
+	keep if _merge == 4
+
+	*We have some duplicate rows, from banks where we gained RSSD info from both the 
+	*2020 and 2021 Avery files. Collapsing down here:
+	keep masterid concatid2020 concatid2021
+	collapse (firstnm) concatid*, by(masterid)
+
+	*We'll merge these banks on three times:
+		*First, to identify and delete any rows identified by the LEI in concatid2020 
+		*Second, to identify and delete any rows identified by the LEI in concatid2021
+		*Finally, an update merge to fill the holes in the time series for these RSSDs in the main panel 
+	preserve
+		replace masterid = concatid2020 
+		keep if masterid != ""
+		merge 1:m masterid using "hmda_harmonizer_panel", keep(using) nogen 
+		save "hmda_harmonizer_panel", replace 
+	restore
+	preserve
+		replace masterid = concatid2021
+		keep if masterid != ""
+		merge 1:m masterid using "hmda_harmonizer_panel", keep(using) nogen 
+		save "hmda_harmonizer_panel", replace
+	restore 
+
+	*before we merge on to the main panel, let's create and populate the name2020/2021
+	*variables 
+	gen lei = concatid2020 
+	merge m:1 lei using "hmda_lender_panels/2020_public_panel_csv.dta", keep(master match) keepusing(respondent_name) nogen
+	ren respondent_name name2020 
+	replace lei = concatid2021 
+	merge m:1 lei using "hmda_lender_panels/2020_public_panel_csv.dta", keep(master match) keepusing(respondent_name) nogen
+	ren respondent_name name2021
+	drop lei
+	*we have to have the main panel as the master to perform the update merge 
+	tempfile type1
+	save `type1'
+	use "hmda_harmonizer_panel", clear 
+	merge m:1 masterid using `type1', update nogen
+	save "hmda_harmonizer_panel", replace 
+
+*Handling the second type:
+	use `lateadditions', clear 
+	keep if _merge == 2
+	
+	*We have some duplicate rows, from banks where we gained RSSD info from both the 
+	*2020 and 2021 Avery files. Collapsing down here:
+	keep masterid concatid2020 concatid2021
+	collapse (firstnm) concatid*, by(masterid)
+	
+	*Here, we don't want to destroy the already-existing rows in our main panel that are LEI-identified,
+	*we just want to update them with the new rssds 
+	destring masterid, gen(rssd_to_add)
+	replace masterid = concatid2021 
+	replace masterid = concatid2020 if masterid == ""
+	
+	tempfile type2 
+	save `type2'
+	use "hmda_harmonizer_panel", clear 
+	merge m:1 masterid using `type2', update 
+	replace masterid = "" if _merge == 3
+	replace rssd = rssd_to_add if _merge == 3
+	tostring rssd_to_add, replace
+	replace masterid = rssd_to_add if _merge == 3
+	order concatid2020 concatid2021, after(concatid2019)
+	drop _merge rssd_to_add
+	
+save "hmda_harmonizer_panel", replace 
