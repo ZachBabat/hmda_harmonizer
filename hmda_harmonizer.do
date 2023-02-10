@@ -1431,7 +1431,7 @@ replace masterid = "2383060" if masterid == "4537317"
 *360 Mortgage Solutions LLC 
 replace masterid = "3715220" if masterid == "4185736"
 *Entrust Mortgage LLC 
-replace masterid = "4185688" if masterid == "3720532"
+replace masterid = "3720532" if masterid == "4185688"
 
 save "hmda_harmonizer_panel", replace 
 
@@ -2078,4 +2078,31 @@ save `lateadditions'
 	order concatid2020 concatid2021, after(concatid2019)
 	drop _merge rssd_to_add
 	
+save "hmda_harmonizer_panel", replace 
+
+
+/*Creating a "recoding" flag variable*/
+
+/*This is a binary variable to flag cases where I've changed the relationship 
+between a HMDA ID/LEI and an RSSD according to personal judgement, or manually
+changed a bank's masterid*/
+gen recoding_flag = 0
+#delimit ;
+foreach x in 
+"3343717" "4320395" "568443" //2.a.i
+"3075401" //2.b.ii.5
+"3874118" "4327965" //2.b.ii.8
+"102379" //2.c.iii.1
+"867856" "3383665" //3.e.ii.2
+"5019678" "3876710" "980951" "649397" "64897" //3.f
+"3310456" "3878750" "111205" "251978" "61122"
+"200378" "2760232" "754929" "3195242" "713926"
+"968557" "977951"
+"4455073" "2351078" "3844492" "3882560" "3950469" //4.a.v-4.a.vi 
+"3876390" "2383060" "3715220" "3720532"
+"112837" "959304" "3913633" "1216826" "2860459" "672984" //4.d
+{; 
+	replace recoding_flag = 1 if masterid == "`x'";
+};
+#delimit cr 
 save "hmda_harmonizer_panel", replace 
