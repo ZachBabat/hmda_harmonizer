@@ -15,7 +15,9 @@ STRUCTURE:
 				4.2 - Identifying "donuts"		
 				4.3 - Matching donuts onto information from the Avery file 
 				4.4 - Using information from the Avery file to identify RSSD switchers
-			5. Final adjustments: adding lenders in loan data but not panels, quality checks
+			5. Adjustments: adding lenders in loan data but not panels, 
+							working with 2020/2021 Avery file
+			6. Final cleanup: confirming correct names, variable labelling
 */
 
 /*0. SET-UP*/
@@ -1673,7 +1675,7 @@ replace donut = 0 if masterid == "672984"
 
 save "hmda_harmonizer_panel", replace 
 
-/*SECTION 5. FINAL ADJUSTMENTS: ADDING LENDERS IN LOAN DATA BUT NOT PANELS, QUALITY CHECKS********/
+/*SECTION 5. ADJUSTMENTS: ADDING LENDERS IN LOAN DATA BUT NOT PANELS, QUALITY CHECKS********/
 
 *5.a
 *ADDING LENDERS IN LOAN-LEVEL DATA BUT NOT PANELS
@@ -2105,4 +2107,72 @@ foreach x in
 	replace recoding_flag = 1 if masterid == "`x'";
 };
 #delimit cr 
+save "hmda_harmonizer_panel", replace 
+
+
+/*******************************************************************************
+****************************6. FINAL ADJUSTMENTS********************************
+*******************************************************************************/
+
+*First, confirm again that each concatid is unique within each year
+forvalues x = 2010/2021 {
+	preserve 
+		drop if concatid`x' == ""
+		isid concatid`x'
+	restore 
+}
+
+*Re-merging on bank names
+*Upon final review, I have noticed that bank names very rarely appear incorrect.
+*Out of an abundance of caution, we re-merge the bank names on year by year
+
+*We're going to do this as a series of m:1 update merges from our panel to 
+*each year's lender file. Since we just confirmed each concatid is unique in each
+*year, except for banks with missing concatids, we can be confident that each 
+*concatid will match onto the appropriate name from that year
+
+drop name*
+
+forvalues x = 2010/2017 {
+	*Breaking concatid`x' into its component parts
+	gen agencycode = substr(concatid`x', 1, 1)
+	destring agencycode, replace 
+	gen respondentid = substr(concatid`x', 2, .)
+	
+	merge m:1 agencycode respondentid using hmda_lender_panels/hmda_`x'_panel, ///
+	assert(master match) keepusing(respondentnamepanel) nogen
+	ren respondentnamepanel name`x'
+	
+	drop agencycode respondentid
+}
+
+forvalues x = 2018/2021 {
+	gen lei = concatid`x'
+	merge m:1 lei using hmda_lender_panels/`x'_public_panel_csv, assert(master match) ///
+	keepusing(respondent_name) nogen
+	ren respondent_name name`x'
+	
+	drop lei
+}
+
+*Dropping additional unneccessary variables
+drop donut prepostmerge 
+
+*Fixing variable labels
+label var masterid "Unique, time-invariant lender identifier"
+label var rssd "Lender RSSD (when available)"
+label var metaid "Ad-hoc identifier for banks missing both RSSD and LEI"
+forvalues x = 2010/2017 {
+	label var concatid`x' "Concatenation of agencycode and respondentid for this lender in the `x' lender panel"
+	label var name`x' "Name associated with this lender in the `x' lender panel"
+}
+forvalues x = 2018/2021 {
+	label var concatid`x' "LEI code for this lender in the `x' lender panel"
+	label var name`x' "Name associated with this lender in the `x' lender panel"
+}
+label var recoding_flag "Binary variable to indicate manual masterid-related recoding - see codebook"
+
+order recoding_flag, after(name2021)
+sort masterid rssd 
+
 save "hmda_harmonizer_panel", replace 
