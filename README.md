@@ -3,7 +3,7 @@ Project to create a multi-year crosswalk for HMDA ID codes
 
 # Abstract
 
-The Home Mortgage Disclosure Act (HMDA) dataset is a government publication, containing information information from thousands of lenders about tens of millions of mortgages and mortgage applications each year. It is one of the best public resources for studying mortgage lending in the United States. 
+The Home Mortgage Disclosure Act (HMDA) dataset is a government publication, containing information information from thousands of lenders about tens of millions of mortgages and mortgage applications each year. It is one of the best public resources for studying mortgage lending in the United States. HMDA contains identifying information that enables researchers to study the lending behavior of individual banks. However, HMDA is published in yearly installments, and the codes used to identify lenders can change between years. This makes it difficult to perform studies that require consistently identifying the same lender in multiple years of the dataset - for instance, in regressions using multiple years of HMDA data with fixed effects for individual banks.
 
 # Contents:
 
