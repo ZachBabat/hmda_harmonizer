@@ -1,26 +1,22 @@
 /*
 TITLE: hmda_harmonizer.do
-AUTHOR: Zach Babat, 4/18/22
+AUTHOR: Zach Babat, 2/16/23
 
 STRUCTURE: 
-			0. Set-up, unzipping:
-			1. Merging together HMDA panels, 2010-2017 (call this "pre-2017")
+			0. Set-up and data processing:
+			1. Merging together HMDA panels, 2010-2017 (call this "pre-2018")
 			2. Resolving "problembanks" - cases where RSSD == 0, RSSD ==., or
 			   cases where RSSD is nonunique in a given year
-				2.1 - Resolving duplicate nonmissing RSSDs
-				2.2 - Resolving missing RSSDs 
-			3. Merging on post-2017 data (2018-2021)
+			3. Merging on post-2018 data (2018-2021)
 			4. Resolving "donuts" and "switchers"
-				4.1 - Identifying RSSD switchers using HMDA IDs 
-				4.2 - Identifying "donuts"		
-				4.3 - Matching donuts onto information from the Avery file 
-				4.4 - Using information from the Avery file to identify RSSD switchers
 			5. Adjustments: adding lenders in loan data but not panels, 
 							working with 2020/2021 Avery file
 			6. Final cleanup: confirming correct names, variable labelling
 */
 
-/*0. SET-UP*/
+********************************************************************************
+********************** 0. SET UP AND DATA PROCESSING****************************
+********************************************************************************
 clear all 
 set more off
 set varabbrev off 
@@ -98,8 +94,10 @@ erase arid2017_to_lei_xref_csv.csv
 cd ..
 
 
+********************************************************************************
+******************* 1.MERGING TOGETHER PRE-2018 LENDER PANELS ******************
+********************************************************************************
 	
-/*SECTION 1. MERGING TOGETHER HMDA PANELS, PRE-2017****************************/
 use "hmda_lender_panels/hmda_2010_panel"
 keep respondentrssdid respondentid agencycode respondentnamepanel parentrssdid 
 ren respondentid respondentid2010
@@ -205,12 +203,13 @@ order respondentrssdid respondentname*
 
 save "hmda_harmonizer_panel", replace
 
-/*SECTION 2. Resolving "problembanks" cases where RSSD == 0, RSSD ==., or
-cases where RSSD is nonunique in a given year**********************************/
+********************************************************************************
+*********2. RESOLVE "PROBLEM BANKS" WITH 0/MISSING/DUPLICATED RSSDS*************
+********************************************************************************
 
 /*We now have a dataset containing the HMDA IDs of our problem banks.
-Visual inspection indicates that the HMDA IDs for these banks seem pretty stable.
-We'll do the following:
+We'll do the following to handle cases where RSSD == 0, RSSD ==., or
+cases where RSSD is nonunique in a given year:
 	-Reshape problem banks to long format
 	-Reshape the main dataset of non-problem banks (003_hmda_id_panel) to long
 	 format
@@ -225,7 +224,7 @@ to the identifier time series to which they belong*/
 use `problembanks', clear
 keep year name dup problembank concatid respondentrssdid
 
-/*SECTION 2.1 - Setting aside banks with duplicate non-missing RSSDs***********/
+/*Setting aside banks with duplicate non-missing RSSDs***********/
 *Ultimately, these get merged into the main dataset much later, but it's helpful
 *to separate these from the missing-RSSD problembanks and set them aside to be
 *merged later
@@ -274,7 +273,7 @@ preserve
 restore 
 
 
-/*SECTION 2.2 - Sorting out banks with missing RSSDs***************************/ 
+/*Sorting out banks with missing RSSDs***************************/ 
 
 *first, we drop the duplicate-RSSD problembanks, which we just handled above
 drop if dup != .
@@ -616,7 +615,7 @@ order masterid
 save "hmda_harmonizer_panel", replace 
 
 
-/*SECTION 2.3 - Merging on banks with duplicate non-missing RSSDs**************/
+/*Merging on banks with duplicate non-missing RSSDs**************/
 use `dupbanks', clear
 order concatid* respondentname*, sequential
 order respondentrssdid 
@@ -692,32 +691,11 @@ replace masterid = "3881992" if concatid2016 == "747-5133238"
 
 save "hmda_harmonizer_panel", replace 
 
-/*SECTION 3. MERGING ON POST-2017 DATA*****************************************/
-*SUBSECTION 1
-*Using LEI as a merge key, merge together banks in the 2018-2021 data
-*Set aside 20 banks with more than 1 RSSD per LEI
+********************************************************************************
+***********************3. MERGING ON POST-2018 DATA*****************************
+********************************************************************************
 
-*SUBSECTION 2
-*Looking at the LEIs that don't come with RSSDs, try to recover RSSDs from the NIC dataset
-*Perform an update merge to add recovered RSSDs to the main 2018-2021 panel
-*Repeat, using the Avery file instead of the NIC dataset
-
-*SUBSECTION 3
-*For the banks still missing RSSDs, take three measures to try to match up to pre-2017 banks
-*	Use concatids, as found in the individual year HMDA lender panels
-*	Use the LEI-concatid crosswalk from HMDA
-*	Look up LEIs in the Avery files to look again for concatids or RSSD 
-*After this, we give up and assume we found all the RSSDs that can be found
-
-*SUBSECTION 4
-*Generate unique IDs for banks that lack RSSD or metaid
-*Collapse 6 pairs of duplicate-RSSD observations into one bank per pair
-*Match the 2018-2021 panel back onto the pre-2017 panel using RSSD/metaid
-
-*SUBSECTION 5 
-*Merging on multi-RSSD LEIs from subsection 1
-
-/*SUBSECTION 1: MERGING 2018-2021 PANELS, SETTING ASIDE MULTI-RSSD BANKS*/
+/*MERGING 2018-2021 PANELS, SETTING ASIDE MULTI-RSSD BANKS*/
 
 *First, we'll merge the 2018-2021 panels together using LEI as a merge key
 *Rather than actually merging, we'll append these panels together, set aside
@@ -754,7 +732,7 @@ preserve
 restore 
 
 *now, dropping those multi-RSSD LEI observations and reshaping wide, so we have our 
-*basic panel for post-2017 banks 
+*basic panel for post-2018 banks 
 drop if rssdcount > 1
 drop rssdcount 
 reshape wide rssd name, i(lei) j(year)
@@ -782,7 +760,7 @@ keep if rssd == -1
 tempfile missingrssdpost2017
 save `missingrssdpost2017', replace
 
-/*SUBSECTION 2: TRYING TO ADD RSSDs TO BANKS MISSING THEM*/
+/*TRYING TO ADD RSSDs TO BANKS MISSING THEM*/
 
 *Right now, we have 503 observations (out of 6025) that have rssd == -1.
 *First, we'll try using the NIC datasets to match from each of these 503 banks
@@ -878,9 +856,9 @@ save `missingrssdpost2017', replace
 
 *We are down to 473 banks still missing RSSDs.
 
-/*SUBSECTION 3: MATCHING MISSING RSSD BANKS TO PRE-2017 BANKS BY PRE-2017 HMDA ID*/
-*After the steps above, we assume that post-2017 banks truly have no RSSD attached.
-*We now do one last check that the post-2017 banks don't have any pre-2017
+/*MATCHING MISSING RSSD BANKS TO PRE-2018 BANKS BY PRE-2018 HMDA ID*/
+*After the steps above, we assume that post-2018 banks truly have no RSSD attached.
+*We now do one last check that the post-2018 banks don't have any pre-2018
 *counterparts using HMDA IDs, which we look for using:
 	*The 2018-2020 HMDA bank panels
 	*The lei-to-HMDA ID crosswalk, created by HMDA (we demonstrate this step is not necessary)
@@ -909,11 +887,11 @@ forvalues i = 2020/2021 {
 *the 2018 HMDA IDs.
 
 *Note that we only care about the 2018 IDs because we are just trying to link
-*these rows up to their pre-2017 IDs. We don't need to worry about donuts around
+*these rows up to their pre-2018 IDs. We don't need to worry about donuts around
 *the year 2017 as long as every one of the banks that finds *some* kind of 
-*HMDA ID merges onto the pre-2017 panel using the 2018 ID. Once we establish
-*the pre-2017 and post-2017 link, we don't need to worry about what the post-2017
-*panels list as HMDA ID, because we use LEI as the ID in the loan-level data in post-2017 years
+*HMDA ID merges onto the pre-2018 panel using the 2018 ID. Once we establish
+*the pre-2018 and post-2018 link, we don't need to worry about what the post-2018
+*panels list as HMDA ID, because we use LEI as the ID in the loan-level data in post-2018 years
 
 /*3.d.ii.1
 The following block of code demonstrates that, conditional on matching to a valid HMDA ID,
@@ -957,9 +935,9 @@ assert (arid_2018 != "-1" & arid_2018 != "")
 
 keep rssd lei name* arid_2018
 
-*We now have 124 post-2017 banks that don't have RSSD codes, but that do have
-*pre-2017 HMDA IDs filled out in the lender panels. We want to match these
-*post-2017 banks to their pre-2017 counterparts, and we do this here
+*We now have 124 post-2018 banks that don't have RSSD codes, but that do have
+*pre-2018 HMDA IDs filled out in the lender panels. We want to match these
+*post-2018 banks to their pre-2018 counterparts, and we do this here
 
 tempfile aridmerge1
 save `aridmerge1'
@@ -967,7 +945,7 @@ clear
 
 use "hmda_harmonizer_panel" 
 *we need to make a variable that has the 2017 HMDA IDs reformatted to match
-*the post-2017 IDs. Namely, we need to remove "-" characters
+*the post-2018 IDs. Namely, we need to remove "-" characters
 
 gen arid_2018 = subinstr(concatid2017, "-", "", .)
 
@@ -979,13 +957,13 @@ gen arid_2018 = subinstr(concatid2017, "-", "", .)
 *differently than in our panel above (one version features a "-" or a leading zero in 
 *the respondentid.) 
 
-*Below I manually code the arid_2018 variable to make sure the pre-2017
-*banks find their post-2017 counterparts. You can verify that these recodings are 
-*correct because the names for these concatids match in the pre- and post-2017 lender panels.
+*Below I manually code the arid_2018 variable to make sure the pre-2018
+*banks find their post-2018 counterparts. You can verify that these recodings are 
+*correct because the names for these concatids match in the pre- and post-2018 lender panels.
 
 *Note that this is not a recoding of the actual ID codes used to match banks to loans 
-*in the pre-2017 data. This is just to improve the veracity of matching post-2017 banks 
-*onto their pre-2017 counterparts using pre-2017 HMDA ID as a merge key
+*in the pre-2018 data. This is just to improve the veracity of matching post-2018 banks 
+*onto their pre-2018 counterparts using pre-2018 HMDA ID as a merge key
 replace arid_2018 = "7261234319" if masterid == "A50" //corrected from 726-1234319, reports only in 2016
 replace arid_2018 = "7300217804" if masterid == "A7" //corrected from 70300217804
 replace arid_2018 = "761341084" if masterid == "A9" //corrected from 706-1341084
@@ -993,8 +971,8 @@ replace arid_2018 = "7753197409" if masterid == "A198" //corrected from 775-3197
 replace arid_2018 = "781-1250682" if masterid == "A209" //corrected from 781-1250682
 replace arid_2018 = "962-1627636" if masterid == "A241" //corrected from 962-1627636
 
-*For the other 6 post-2017 banks that don't match, I was unable to find banks in the pre-2017
-*data that look like suitable matches, so we are unable to connect the post-2017 banks
+*For the other 6 post-2018 banks that don't match, I was unable to find banks in the pre-2018
+*data that look like suitable matches, so we are unable to connect the post-2018 banks
 *despite them having populated HMDA ID variables in the lender panels
 
 drop if arid_2018 == ""
@@ -1004,7 +982,7 @@ merge 1:1 arid_2018 using `aridmerge1'
 sort _merge arid_2018 
 order _merge arid_2018
 
-*keeping only primary identifying information and merging back onto post-2017 panel
+*keeping only primary identifying information and merging back onto post-2018 panel
 keep if _merge == 3
 keep respondentrssdid metaid lei
 ren respondentrssdid rssd 
@@ -1017,17 +995,17 @@ sort rssd metaid
 order metaid, after(rssd)
 save `workingpost2017', replace 
 *Note that the merge above is the first time the "metaid" variable gets introduced
-*into the post-2017 panel. This makes sense, since we had only been merging on 
+*into the post-2018 panel. This makes sense, since we had only been merging on 
 *RSSD before, and metaid is reserved for banks that don't have RSSDs.
 
 
 /*3.d.ii.2
 Below is code showing that the remaining missing RSSD banks don't find 
 *HMDA IDs in the Avery file, and therefore we don't need to merge on any info from
-*the Avery file to help connect post-2017 banks to pre-2017 counterparts
+*the Avery file to help connect post-2018 banks to pre-2018 counterparts
 
 *Let's reload the list of missing RSSD banks, drop the banks that just matched 
-*to HMDA IDs in the pre-2017 data, and keep working 
+*to HMDA IDs in the pre-2018 data, and keep working 
 clear 
 use `missingrssdpost2017'
 merge 1:1 lei using `aridmerge1', keep(master) nogen
@@ -1047,27 +1025,27 @@ ren CODE17 code19
 
 *The oldid, hmprid*, and code* variables are all empty, except for 6 banks. These
 *6 banks are the same 6 banks discussed around line 972 above. Even though the
-*HMDA lender panels give pre-2017 HMDA IDs for these, they don't merge onto
-*the pre-2017 panel and I could not find any suitable matches in the pre-2017 panel
+*HMDA lender panels give pre-2018 HMDA IDs for these, they don't merge onto
+*the pre-2018 panel and I could not find any suitable matches in the pre-2018 panel
 *when I checked manually. 
 */
 
 *We now have only 355 banks missing RSSD IDs or other information that could match
-*post-2017 banks onto pre-2017 banks.
+*post-2018 banks onto pre-2018 banks.
 
-*At this point, we conclude that banks missing RSSDs and pre-2017 HMDA IDs do not
-*appear in the pre-2017 panel. We now stop trying to match these banks onto other
-*ID codes and move on to finalizing the post-2017 panel and merging it onto the
-*pre-2017 panel.
+*At this point, we conclude that banks missing RSSDs and pre-2018 HMDA IDs do not
+*appear in the pre-2018 panel. We now stop trying to match these banks onto other
+*ID codes and move on to finalizing the post-2018 panel and merging it onto the
+*pre-2018 panel.
 
 
-/*SUBSECTION 4 - CLEAN-UP, MERGING ONTO PRE-2017 PANEL*/
+/*CLEAN-UP, MERGING ONTO PRE-2018 PANEL*/
 *Generating the masterid variable. For each bank, this will be the first variable
 *from the following list that is not missing:
 	*rssd
 	*metaid
-	*lei (if masterid = lei, then a bank only shows up in the post-2017 data, and
-	*it has no pre-2017 counterpart)
+	*lei (if masterid = lei, then a bank only shows up in the post-2018 data, and
+	*it has no pre-2018 counterpart)
 
 tostring rssd, gen(masterid)
 replace masterid = metaid if metaid != ""
@@ -1075,9 +1053,9 @@ replace masterid = lei if masterid == "-1"
 
 *It will be helpful to have variables that hold the LEI for each bank in each year.
 
-*In the post-2017 data, loans are not matched to banks with HMDA IDs, but rather
+*In the post-2018 data, loans are not matched to banks with HMDA IDs, but rather
 *with LEI codes. Here, we generate "concatid2018-2021" variables to match the format
-*of the pre-2017 panel. (It's helpful to have distinct columns for LEI in each year,
+*of the pre-2018 panel. (It's helpful to have distinct columns for LEI in each year,
 *because this handles the extremely rare case of lei code changes for a given bank)
 
 gen concatid2018 = lei if name2018 != ""
@@ -1125,7 +1103,7 @@ drop if lei == "5493005C8ZBTKUWJPI93"
 *Dropping the lei variable, since we have at least two cases where LEI switches
 drop lei
 
-*Now, we merge these post-2017 banks onto the pre-2017 banks.
+*Now, we merge these post-2018 banks onto the pre-2018 banks.
 isid masterid
 ren rssd respondentrssdid
 replace respondentrssdid = . if respondentrssdid == -1
@@ -1149,8 +1127,8 @@ agencycode2015 respondentid2015 agencycode2016 respondentid2016 agencycode2017 r
 merge2*, after(name2021)
 order parent*, after(merge2017) sequential
 
-*Because we merged m:1 using masterid, two pre-2017 rows with duplicate RSSDs 
-*both match to unique rows in the post-2017 data. Fixing here:
+*Because we merged m:1 using masterid, two pre-2018 rows with duplicate RSSDs 
+*both match to unique rows in the post-2018 data. Fixing here:
 replace concatid2018 = "" if concatid2016 == "747-5133238"
 replace concatid2019 = "" if concatid2016 == "747-5133238"
 replace concatid2020 = "" if concatid2016 == "747-5133238"
@@ -1165,7 +1143,7 @@ save "hmda_harmonizer_panel", replace
 
 *3.f
 
-/*SUBSECTION 5: MERGING ON MULTI-RSSD LEIs FROM SUBSECTION 1*/
+/*MERGING ON MULTI-RSSD LEIs FROM SUBSECTION 1*/
 *Dealing with the multi-RSSD LEI observations from subsection 1:
 use `multi_RSSD_leis', clear
 
@@ -1184,7 +1162,6 @@ replace rssd = 3883080 if lei == "54930048P8RWCQHQM310"
 drop rssdcount
 
 reshape wide lei name, i(rssd) j(year)
-
 
 *THIS IS OUR FIRST TIME EXPLICITLY RECODING SWITCHER BANKS INTO ONE. HOW WILL WE DO THIS?
 *WE'LL KEEP TWO ROWS, ONE FOR EACH RSSD. BUT, WE TAG BOTH ROWS WITH THE MASTERID 
@@ -1215,85 +1192,24 @@ replace masterid = "511579" if lei == "5493006MA7WP1WL8U431"
 replace masterid = "3944664" if lei == "549300BRJZYHYKT4BJ84"
 replace masterid = "3883080" if lei == "54930048P8RWCQHQM310"
 
-*Regent Financial Group, Inc. - there is no record of an RSSD transformation in 
-*the NIC dataset, but these two banks share an LEI and an address. (The names actually
-*might differ - 5213908 is actually listed as "Recent Financial Group, Inc." in NIC)
+*See documentation appendix B, section 3.f for details regarding these recoding decisions
+
+
 replace masterid = "5019678" if lei == "254900LW5BPW0G1LMW49"
-
-*Draper and Kramer Mortgage Corp. - this bank is listed in the NIC data as 
-*1st Advantage Mortgage, but there's a page on the Draper and Kramer website 
-*showing that 1st Advantage changed its name to Draper and Kramer. We can also see this
-*in the time series of names for RSSD 3876710. Though I cannot find evidence of an
-*RSSD change to 3327511 (and 3327511 does not show up in the NIC dataset), because 
-*these two RSSDs are associated by LEI and name, it's probably fair to group them
-*together.
 replace masterid = "3876710" if lei == "5493001R92DY5DI1DI85"
-
-*There is no evidence for an RSSD change here, but this appears to me like some 
-*form of typo or deletion - the RSSD changes from 980951 to 98095, and there is 
-*no record of RSSD 98095 in the NIC dataset
 replace masterid = "980951" if lei == "5493003QF1L7XNSWRM19"
-
-*Community First Credit Union - despite having the same LEI, I believe we should
-*keep these two banks separate. In the NIC dataset, RSSD 649397 is marked with 
-*"charter discontinued," consistent with the bank being bought out by another meaningfully
-*different group, as opposed to "charter retained." This looks more like an acquisition 
-*after which the bank might change characteristics, as opposed to a simple name or RSSD change.
 replace masterid = "649397" if rssd == 649397
 replace masterid = "64897" if rssd == 64897
-
-*NorthMarq Capital Finance, L.L.C - both of these RSSDs dropped out of the NIC dataset 
-*in 2009, so we don't have any data from that. But we'll assume these two are
-*the same institution based on name and LEI
 replace masterid = "3310456" if lei == "549300AV8QD552DSI743"
-
-*Cooperativa de Ahorro y Credito de Aguada - the RSSD changes between 2019 and 2020.
-*There's no record of this in the NIC data, but these two banks share a name and LEI.
-*Based on the pre-2017 data, I think this bank actually switches between these two
-*RSSDs between 2016 and 2017. We'll use the first of these RSSDs to appear, 3878750,
-*as the masterid
 replace masterid = "3878750" if lei == "549300BGJTHEIKSJJS77"
-
-*SIS Bancorp, MHC - According to NIC, RSSD 3815054 is the parent company of 
-*RSSD 111205. 111205 reports from 2010-2017 under "Sanford Inst For Svg" (presumably
-*becomes "SIS" later), and again from 2019-2020, so let's group these two banks together under that RSSD
 replace masterid = "111205" if lei == "549300DK2AEMKCO4JZ92"
-
-*Homeland Bancshares, Inc. - According to NIC, 3816547 is a holding company for 
-*251978. Because these share a name and LEI, let's group them together.
 replace masterid = "251978" if lei == "549300DOQN3O7NL3CA31"
-
-*First United Corporation - another holding company/held lender relationship.
 replace masterid = "61122" if lei == "549300G54QPXQLB4KN58"
-
-*Banc of California, National Association - another holding company/held lender 
-*relationship. It appears that the RSSDs switch back and forth in the pre-2017 data, 
-*but begin with 200378, so we'll make that the masterid
 replace masterid = "200378" if lei == "549300IBHVRZNE4YFN80"
-
-*Village Bank and Trust Financial Corp. - another holding company/held lender 
-*relationship. It appears that the RSSDs switch back and forth in the pre-2017 data, 
-*but begin with 2760232, so we'll make that the masterid
 replace masterid = "2760232" if lei == "549300NIJITDSZ8M7H32"
-
-*National Bankshares, Inc. - another holding company/held lender 
-*relationship.
 replace masterid = "754929" if lei == "549300Q745S62Q6QNW78"
-
-*Residential Mortgage, LLC - another holding company/held lender 
-*relationship. It appears that the RSSDs switch back and forth in the pre-2017 data, 
-*but begin with 200378, so we'll make that the masterid
 replace masterid = "3195242" if lei == "549300SCFWZXMDMZPE93"
-
-*F&M Bank Corp. - another holding company/held lender relationship.
 replace masterid = "713926" if lei == "549300V2YLC1I721HE07"
-
-*Union State Bank of Fargo - this one is complicated. I think RSSD 968557 was 
-*Union State Bank of Fargo. In 2021, USB Fargo was acquired by RSSD 977951, which 
-*was called Border State Bank. Upon acquiring USB Fargo, Border State Bank 
-*assumed the name of its acquisition and became USB Fargo. However, based on the NIC dataset, 
-*the charter for USB Fargo was discontinued, so these two RSSD codes should be considered
-*distinct lenders
 replace masterid = "968557" if rssd == 968557
 replace masterid = "977951" if rssd == 977951
 
@@ -1320,9 +1236,12 @@ drop multi_rssd_lei_merge
 sort masterid
 
 save "hmda_harmonizer_panel", replace
-*we have now completed merging together all the pre-2017 and post-2017 rows
+*we have now completed merging together all the pre-2018 and post-2018 rows
 
-/*SECTION 4. RSSD SWITCHERS AND HMDA ID DONUTS*****************************/
+********************************************************************************
+********************4. RSSD SWITCHERS AND HMDA ID DONUTS************************
+********************************************************************************
+
 /*There are two cases that we need to catch:
 	*1. "Switchers" -
 	*These are cases when an institution changes its RSSD over our observed
@@ -1341,7 +1260,7 @@ save "hmda_harmonizer_panel", replace
 *it does occur - see the rows corresponding to Capital One (masterid 112837)
 */
 
-/*SUBSECTION 1: USE NIC DATASET TO LOOK FOR BANKS THAT SWITCH RSSDs*/
+/*USE NIC DATASET TO LOOK FOR BANKS THAT SWITCH RSSDs*/
 use "hmda_harmonizer_panel", clear 
 keep masterid concatid* name* 
 duplicates tag masterid, gen(flag)
@@ -1437,7 +1356,7 @@ replace masterid = "3720532" if masterid == "4185688"
 
 save "hmda_harmonizer_panel", replace 
 
-/*SUBSECTION 2: IDENTIFYING DONUTS*/
+/*IDENTIFYING DONUTS*/
 *First, we identify the donuts
 use "hmda_harmonizer_panel", clear
 
@@ -1485,7 +1404,7 @@ drop donutmerge
 *saving our donut-identified version of the panel 
 save "hmda_harmonizer_panel", replace 
 
-/*SUBSECTION 3: MATCHING DONUTS ONTO INFORMATION FROM THE AVERY FILE***********/
+/*MATCHING DONUTS ONTO INFORMATION FROM THE AVERY FILE***********/
 keep if donut == 1
 
 *setting aside banks that are not identified by RSSD - we match these onto Avery file 
@@ -1494,7 +1413,7 @@ preserve
 
 	keep if rssd == .
 	
-	*all these banks have either an unchanging pre-2017 ID, an unchanging LEI, or both.
+	*all these banks have either an unchanging pre-2018 ID, an unchanging LEI, or both.
 	*so we can create a variable holding each of these and use them as a merge key for 
 	*the avery file 
 	
@@ -1624,7 +1543,7 @@ assert averymerge2010 == 3 | averymerge2011 == 3 | averymerge2012 == 3 | averyme
 averymerge2014 == 3 | averymerge2015 == 3 | averymerge2016 == 3 | averymerge2017 == 3 | averymerge2018 == 3 | ///
 averymerge2019 == 3
 
-/*SUBSECTION 4: USING INFORMATION FROM THE AVERY FILE TO IDENTIFY RSSD SWITCHERS*/
+/*USING INFORMATION FROM THE AVERY FILE TO IDENTIFY RSSD SWITCHERS*/
  
 egen meanassets = rowmean(ASSETS*)
 egen meanassetl = rowmean(ASSETL*)
@@ -1675,9 +1594,19 @@ replace donut = 0 if masterid == "672984"
 
 save "hmda_harmonizer_panel", replace 
 
-/*SECTION 5. ADJUSTMENTS: ADDING LENDERS IN LOAN DATA BUT NOT PANELS, QUALITY CHECKS********/
+********************************************************************************
+**********5. ADJUSTMENTS: LENDERS NOT IN PANELS, POST-2020 AVERY FILES**********
+********************************************************************************
 
-*5.a
+*Dropping variables that were useful while coding but ultimately unneccessary in the 
+*final panel 
+drop agencycode* respondentid* parentrssdid* merge* 
+
+*All the banks with prepostmerge missing only exist post-2018 
+replace prepostmerge = 2 if prepostmerge == .
+order prepostmerge, last
+
+*5.b
 *ADDING LENDERS IN LOAN-LEVEL DATA BUT NOT PANELS
 
 *Separately, I've merged the HMDA lender panels onto the loan-level data, and 
@@ -1698,32 +1627,15 @@ replace concatid2013 = "984-1542642" if masterid == "2925929"
 *have confirmed that this is the appropriate lender corresponding to this concatid
 replace concatid2014 = "741-1795868" if masterid == "3861163"
 
-*CLEAN-UP AND QUALITY CHECK
-
-*is each concatid unique in each year?
-forvalues i = 2010/2021 {
-	preserve 
-		drop if concatid`i' == ""
-		isid concatid`i'
-	restore 
-}
-
-*Dropping variables that were useful while coding but ultimately unneccessary in the 
-*final panel 
-drop agencycode* respondentid* parentrssdid* merge* 
-
-*All the banks with prepostmerge missing only exist post-2017 
-replace prepostmerge = 2 if prepostmerge == .
-order prepostmerge, last
 save "hmda_harmonizer_panel", replace  
 
-*5.d
-/*ADDING IN POST-2017 BANKS THAT WERE NOT INCLUDED IN HMDA LENDER PANELS*/
+*5.c
+/*ADDING IN POST-2018 BANKS THAT WERE NOT INCLUDED IN HMDA LENDER PANELS*/
 *After attempting to merge the crosswalk above onto the HMDA loan-level data,
 *I find that there are 138 banks that appear in the loan-level data, but not
 *the HMDA lender panels we used to construct our ID crosswalk.
 
-*Those banks all appear in the post-2017 data and thus come with LEIs. Here,
+*Those banks all appear in the post-2018 data and thus come with LEIs. Here,
 *I try to link those LEIs back to RSSDs, and then add these banks into our 
 *ID crosswalk. 
 
@@ -1835,7 +1747,7 @@ use "hmda_harmonizer_panel", clear
 merge m:1 masterid using `missinglei', update replace assert(1 2 4)
 
 replace donut = 0 if _merge == 2 //I checked - none of these are donuts
-replace prepostmerge = 2 if _merge == 2 //these are all post-2017, didn't match to a pre-2017 bank
+replace prepostmerge = 2 if _merge == 2 //these are all post-2018, didn't match to a pre-2018 bank
 drop _merge 
 
 save "hmda_harmonizer_panel", replace  
@@ -1932,6 +1844,7 @@ save `tomerge2020'
 use `working2020'
 keep if _merge == 2
 
+*5.d.iii.2
 *Here, I manually audited the remaining five banks. Two of them, with LEI codes:
 *5493001R92DY5DI1DI85 and 5493003QF1L7XNSWRM19, we've already manually recoded above,
 *and the RSSD in the Avery file actually matches the masterid we manually assigned.
@@ -2082,9 +1995,21 @@ save `lateadditions'
 	
 save "hmda_harmonizer_panel", replace 
 
+/*******************************************************************************
+****************************6. FINAL CLEANUP************************************
+*******************************************************************************/
 
+*First, confirm that each concatid is unique within each year - this is a basic
+*quality check, no HMDA identifier code should show up for two banks in one year
+forvalues x = 2010/2021 {
+	preserve 
+		drop if concatid`x' == ""
+		isid concatid`x'
+	restore 
+}
+
+*6.b
 /*Creating a "recoding" flag variable*/
-
 /*This is a binary variable to flag cases where I've changed the relationship 
 between a HMDA ID/LEI and an RSSD according to personal judgement, or manually
 changed a bank's masterid*/
@@ -2108,19 +2033,6 @@ foreach x in
 };
 #delimit cr 
 save "hmda_harmonizer_panel", replace 
-
-
-/*******************************************************************************
-****************************6. FINAL ADJUSTMENTS********************************
-*******************************************************************************/
-
-*First, confirm again that each concatid is unique within each year
-forvalues x = 2010/2021 {
-	preserve 
-		drop if concatid`x' == ""
-		isid concatid`x'
-	restore 
-}
 
 *Re-merging on bank names
 *Upon final review, I have noticed that bank names very rarely appear incorrect.
@@ -2163,7 +2075,7 @@ label var masterid "Unique, time-invariant lender identifier"
 label var rssd "Lender RSSD (when available)"
 label var metaid "Ad-hoc identifier for banks missing both RSSD and LEI"
 forvalues x = 2010/2017 {
-	label var concatid`x' "Concatenation of agencycode and respondentid for this lender in the `x' lender panel"
+	label var concatid`x' "Concatenation of agencycode and respondentid for lender in `x' lender panel"
 	label var name`x' "Name associated with this lender in the `x' lender panel"
 }
 forvalues x = 2018/2021 {
