@@ -19,6 +19,8 @@ hmda_harmonizer.do: Contains script to replicate the hmda_harmonizer_panel.dta f
 
 Sources.docx: Contains instructions for downloading raw inputs for the hmda_harmonizer.do file
 
+demo_code.do: Contains example code to model use of the hmda_harmonizer_panel dataset
+
 banks_not_in_crosswalk.dta: Supplementary file called during the execution of hmda_harmonizer.do, containing the LEI codes for banks that appear in the HMDA loan-level data but not in the corresponding lender panel. See page 7 of the documentation for details
 
 # Contact:
