@@ -3,9 +3,7 @@ Project to create a multi-year crosswalk for HMDA ID codes
 
 # Abstract
 
-The Home Mortgage Disclosure Act (HMDA) dataset is a government publication, containing information information from thousands 
-of lenders about tens of millions of mortgages and mortgage applications each year. It is one of the best public resources for 
-studying mortgage lending in the United States. 
+The Home Mortgage Disclosure Act (HMDA) dataset is a government publication, containing information information from thousands of lenders about tens of millions of mortgages and mortgage applications each year. It is one of the best public resources for studying mortgage lending in the United States. 
 
 # Contents:
 
@@ -17,9 +15,7 @@ hmda_harmonizer.do: Contains script to replicate the hmda_harmonizer_panel.dta f
 
 Sources.docx: Contains instructions for downloading raw inputs for the hmda_harmonizer.do file
 
-banks_not_in_crosswalk.dta: Supplementary file called during the execution of hmda_harmonizer.do, containing 
-the LEI codes for banks that appear in the HMDA loan-level data but not in the corresponding lender panel. See 
-page 7 of the documentation for details
+banks_not_in_crosswalk.dta: Supplementary file called during the execution of hmda_harmonizer.do, containing the LEI codes for banks that appear in the HMDA loan-level data but not in the corresponding lender panel. See page 7 of the documentation for details
 
 # Contact:
 Zach Babat
