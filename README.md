@@ -22,5 +22,6 @@ Sources.docx: Contains instructions for downloading raw inputs for the hmda_harm
 banks_not_in_crosswalk.dta: Supplementary file called during the execution of hmda_harmonizer.do, containing the LEI codes for banks that appear in the HMDA loan-level data but not in the corresponding lender panel. See page 7 of the documentation for details
 
 # Contact:
-Zach Babat
+Zach Babat:
+
 zachbabat1 [at] gmail [dot] com 
